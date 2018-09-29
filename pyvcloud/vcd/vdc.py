@@ -366,7 +366,13 @@ class VDC(object):
                     E.CustomizationScript(cust_script))
             if hostname is not None:
                 guest_customization_param.append(E.ComputerName(hostname))
-            vm_instantiation_param.append(guest_customization_param)
+        else:
+            guest_customization_param = E.GuestCustomizationSection(
+                E_OVF.Info('Specifies Guest OS Customization Settings'),
+                E.Enabled('false'),
+            )
+            guest_customization_param.append(E.ComputerName("none"))
+        vm_instantiation_param.append(guest_customization_param)
 
         # Craft the <SourcedItem> element for the first vm
         sourced_item = E.SourcedItem(

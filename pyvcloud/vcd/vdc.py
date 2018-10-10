@@ -457,7 +457,9 @@ class VDC(object):
                    entity_type.value == resource.get('type'):
                     result.append({
                         'name': resource.get('name'),
-                        'type': resource.get('type')
+                        'href': resource.get('href'),
+                        'type': resource.get('type'),
+                        'id': resource.get('id')
                     })
         return result
 

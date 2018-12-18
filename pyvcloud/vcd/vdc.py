@@ -148,8 +148,7 @@ class VDC(object):
     # NOQA refer to http://pubs.vmware.com/vcd-820/index.jsp?topic=%2Fcom.vmware.vcloud.api.sp.doc_27_0%2FGUID-BF9B790D-512E-4EA1-99E8-6826D4B8E6DC.html
     def instantiate_vapp(self,
                          name,
-                         catalog,
-                         template,
+                         template_href,
                          description=None,
                          network=None,
                          fence_mode=FenceMode.BRIDGED.value,
@@ -167,7 +166,7 @@ class VDC(object):
                          ip_address=None,
                          storage_profile=None,
                          network_adapter_type=None):
-        """Instantiate a vApp from a vApp template in a catalog.
+        """Instantiate a vApp from a vApp template
 
         If customization parameters are provided, it will customize the vm and
         guest OS, taking some assumptions.
@@ -176,8 +175,7 @@ class VDC(object):
         in the vApp. And the vm has only one NIC.
 
         :param str name: name of the new vApp.
-        :param str catalog: name of the catalog.
-        :param str template: name of the vApp template.
+        :param str template_href: href of the vApp template.
         :param str description: description of the new vApp.
         :param str network: name of a vdc network. When provided, connects the
             vm to the network.
@@ -211,12 +209,7 @@ class VDC(object):
             self.resource = self.client.get_resource(self.href)
 
         # Get hold of the template
-        org_href = find_link(self.resource, RelationType.UP,
-                             EntityType.ORG.value).href
-        org = Org(self.client, href=org_href)
-        catalog_item = org.get_catalog_item(catalog, template)
-        template_resource = self.client.get_resource(
-            catalog_item.Entity.get('href'))
+        template_resource = self.client.get_resource(template_href)
 
         # If network is not specified by user then default to
         # vApp network name specified in the template
@@ -422,7 +415,7 @@ class VDC(object):
             vapp_template_params.append(vapp_instantiation_param)
 
         vapp_template_params.append(
-            E.Source(href=catalog_item.Entity.get('href')))
+            E.Source(href=template_href))
 
         vapp_template_params.append(sourced_item)
 

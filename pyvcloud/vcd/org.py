@@ -21,7 +21,7 @@ import tempfile
 import time
 import traceback
 import urllib
-
+from contextlib import ExitStack
 from lxml import etree
 from lxml import objectify
 
@@ -536,13 +536,15 @@ class Org(object):
         entity_resource = self.client.get_resource(
             catalog_item_resource.Entity.get('href'))
         file_href = entity_resource.Files.File.Link.get('href')
-        return self._upload_file(
-            file_name, file_href, chunk_size=chunk_size, callback=callback)
+        with open(file_name, 'rb') as f:
+            return self._upload_file(
+                f, file_href, chunk_size=chunk_size, callback=callback)
 
     def upload_ovf(self,
-                   catalog_name,
-                   file_name,
-                   item_name=None,
+                   catalog_href,
+                   ovf_obj,
+                   res_opener,
+                   item_name,
                    description='',
                    chunk_size=DEFAULT_CHUNK_SIZE,
                    callback=None):
@@ -551,10 +553,11 @@ class Org(object):
         This method only uploads bits to vCD spool area, doesn't block while
         vCD imports the uploaded bit into catalog.
 
-        :param str catalog_name: name of the catalog where the ova file will
+        :param str catalog_href: href of the catalog where the ova file will
             be uploaded.
-        :param str file_name: name of the ova file on local disk which will be
-            uploaded.
+        :param ovf_obj: the ovf file object
+        :param function res_opener: a function which returns the file object
+            for the resources in ovf, e.g., vmdks
         :param str item_name: this param let's us rename the ova file once
             uploaded to the catalog. If this param is not specified, the
             catalog item will share the same name as the ova file being
@@ -572,30 +575,10 @@ class Org(object):
         :raises: EntityNotFoundException: if the catalog is not found.
         :raises: InternalServerException: if item already exists in catalog.
         """
-        catalog_resource = self.get_catalog(catalog_name)
-        if item_name is None:
-            item_name = os.path.basename(file_name)
-        total_bytes_uploaded = 0
+        catalog_resource = self.client.get_resource(catalog_href)
 
         try:
-            tempdir = tempfile.mkdtemp(dir='.')
-            ova = tarfile.open(file_name)
-            ova.extractall(path=tempdir,
-                           members=get_safe_members_in_tar_file(ova))
-            ova.close()
-            ovf_file = None
-            extracted_files = os.listdir(tempdir)
-            for f in extracted_files:
-                fn, ex = os.path.splitext(f)
-                if ex == '.ovf':
-                    ovf_file = os.path.join(tempdir, f)
-                    break
-            if ovf_file is None:
-                raise UploadException('OVF descriptor file not found.')
-
-            stat_info = os.stat(ovf_file)
-            total_bytes_uploaded += stat_info.st_size
-            ovf_resource = objectify.parse(ovf_file)
+            ovf_resource = objectify.parse(ovf_obj)
             files_to_upload = []
             ns = '{' + NSMAP['ovf'] + '}'
             for f in ovf_resource.getroot().References.File:
@@ -639,25 +622,28 @@ class Org(object):
 
                 if source_file['chunkSize'] is not None:
                     file_paths = self._get_multi_part_file_paths(
-                        tempdir, source_file_name, int(source_file_size),
+                        '.', source_file_name, int(source_file_size),
                         int(source_file['chunkSize']))
-                    total_bytes_uploaded += self._upload_multi_part_file(
-                        file_paths, target_uri, chunk_size, callback)
+
+                    with ExitStack() as es:
+                        file_objs = [es.enter_context(res_opener(fpath))
+                                     for fpath in file_paths]
+
+                        self._upload_multi_part_file(
+                            file_objs, target_uri, chunk_size, callback)
                 else:
-                    file_path = os.path.join(tempdir, source_file_name)
-                    total_bytes_uploaded += self._upload_file(
-                        file_path,
-                        target_uri,
-                        chunk_size=chunk_size,
-                        callback=callback)
+                    file_path = source_file_name
+                    with res_opener(file_path) as file_obj:
+                        self._upload_file(
+                            file_obj,
+                            target_uri,
+                            chunk_size=chunk_size,
+                            callback=callback)
         except Exception as e:
-            print(traceback.format_exc())
             raise UploadException('Ovf upload failed').with_traceback(
                 e.__traceback__)
-        finally:
-            shutil.rmtree(tempdir)
 
-        return total_bytes_uploaded
+        return entity_resource.get('id')
 
     def _get_multi_part_file_paths(self, base_dir, base_file_name,
                                    total_file_size, part_size):
@@ -695,13 +681,13 @@ class Org(object):
         return file_paths
 
     def _upload_file(self,
-                     file_name,
+                     file_obj,
                      target_uri,
                      chunk_size=DEFAULT_CHUNK_SIZE,
                      callback=None):
         """Helper function to upload contents of a local file.
 
-        :param str file_name: name of the file on local disk whose content
+        :param file_obj: object of the file on local disk whose content
             will be uploaded to the uri.
         :param str target_uri: uri where the contents of the local file will
             be uploaded to.
@@ -716,16 +702,16 @@ class Org(object):
         :rtype: int
         """
         return self._upload_part_file(
-            file_name, target_uri, chunk_size=chunk_size, callback=callback)
+            file_obj, target_uri, chunk_size=chunk_size, callback=callback)
 
     def _upload_multi_part_file(self,
-                                part_file_paths,
+                                part_file_objs,
                                 target_uri,
                                 chunk_size=DEFAULT_CHUNK_SIZE,
                                 callback=None):
         """Helper function to upload contents of a multi-part local file.
 
-        :param list(str) part_file_paths: the path (with name) of the parts of
+        :param part_file_obj: the objects of the parts of
             the file on local disk whose content will be uploaded to the uri.
         :param str target_uri: uri where the contents of the local file will
             be uploaded to.
@@ -740,19 +726,18 @@ class Org(object):
         :rtype: int
         """
         total_bytes_to_upload = 0
-        for part_file in part_file_paths:
-            stat_info = os.stat(part_file)
-            total_bytes_to_upload += stat_info.st_size
+        for part_file_obj in part_file_objs:
+            total_bytes_to_upload += part_file_obj.size
 
         uploaded_bytes = 0
-        for part_file_name in part_file_paths:
+        for part_file_obj in part_file_objs:
             uploaded_bytes += self._upload_part_file(
-                part_file_name, target_uri, uploaded_bytes,
+                part_file_obj, target_uri, uploaded_bytes,
                 total_bytes_to_upload, chunk_size, callback)
         return uploaded_bytes
 
     def _upload_part_file(self,
-                          part_file_path,
+                          part_file_obj,
                           target_uri,
                           offset=0,
                           total_file_size=None,
@@ -760,7 +745,7 @@ class Org(object):
                           callback=None):
         """Helper function to upload contents of a single part file.
 
-        :param list(str) part_file_path: path (with name) of the part-file on
+        :param part_file_obj: file object of the part-file on
             local disk whose content will be uploaded to the uri.
         :param str target_uri: uri where the contents of the local part-file
             will be uploaded to.
@@ -778,15 +763,14 @@ class Org(object):
 
         :rtype: int
         """
-        stat_info = os.stat(part_file_path)
-        part_file_size = stat_info.st_size
+        part_file_size = part_file_obj.size
         if total_file_size is None:
             total_file_size = part_file_size
         uploaded_bytes = 0
 
-        with open(part_file_path, 'rb') as f:
+        if True:
             while uploaded_bytes < part_file_size:
-                data = f.read(chunk_size)
+                data = part_file_obj.read(chunk_size)
                 data_size = len(data)
                 if data_size <= chunk_size:
                     range_str = 'bytes %s-%s/%s' % \

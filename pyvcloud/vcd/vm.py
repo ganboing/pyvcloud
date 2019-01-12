@@ -286,6 +286,28 @@ class VM(object):
         return self._perform_power_operation(rel=RelationType.POWER_ON,
                                              operation_name='power on')
 
+    def discard_state(self):
+        """Discard suspend state.
+
+        :return: an object containing EntityType.TASK XML data which represents
+            the asynchronous task that is powering on the vm.
+
+        :rtype: lxml.objectify.ObjectifiedElement
+        """
+        return self._perform_power_operation(rel=RelationType.DISCARD_STATE,
+                                             operation_name='discard suspend state')
+
+    def suspend(self):
+        """Suspends the vm.
+
+        return: an object containing EntityType.TASK XML data which represents
+            the asynchronous task that is powering on the vm.
+
+        :rtype: lxml.objectify.ObjectifiedElement
+        """
+        return self._perform_power_operation(rel=RelationType.POWER_SUSPEND,
+                                             operation_name='suspend')
+
     def power_off(self):
         """Powers off the vm.
 

@@ -148,7 +148,7 @@ class VDC(object):
     # NOQA refer to http://pubs.vmware.com/vcd-820/index.jsp?topic=%2Fcom.vmware.vcloud.api.sp.doc_27_0%2FGUID-BF9B790D-512E-4EA1-99E8-6826D4B8E6DC.html
     def instantiate_vapp(self,
                          name,
-                         template_href,
+                         template_res,
                          description=None,
                          network=None,
                          fence_mode=FenceMode.BRIDGED.value,
@@ -175,7 +175,8 @@ class VDC(object):
         in the vApp. And the vm has only one NIC.
 
         :param str name: name of the new vApp.
-        :param str template_href: href of the vApp template.
+        :param lxml.objectify.ObjectifiedElement template_res:
+            vApp template resource.
         :param str description: description of the new vApp.
         :param str network: name of a vdc network. When provided, connects the
             vm to the network.
@@ -208,12 +209,9 @@ class VDC(object):
         if self.resource is None:
             self.resource = self.client.get_resource(self.href)
 
-        # Get hold of the template
-        template_resource = self.client.get_resource(template_href)
-
         # If network is not specified by user then default to
         # vApp network name specified in the template
-        template_networks = template_resource.xpath(
+        template_networks = template_res.xpath(
             '//ovf:NetworkSection/ovf:Network',
             namespaces={
                 'ovf': NSMAP['ovf']
@@ -266,7 +264,7 @@ class VDC(object):
                         network_configuration, networkName=network_name)))
 
         # Get all vms in the vapp template
-        vms = template_resource.xpath(
+        vms = template_res.xpath(
             '//vcloud:VAppTemplate/vcloud:Children/vcloud:Vm',
             namespaces=NSMAP)
         assert len(vms) > 0
@@ -415,7 +413,7 @@ class VDC(object):
             vapp_template_params.append(vapp_instantiation_param)
 
         vapp_template_params.append(
-            E.Source(href=template_href))
+            E.Source(href=template_res.get('href')))
 
         vapp_template_params.append(sourced_item)
 

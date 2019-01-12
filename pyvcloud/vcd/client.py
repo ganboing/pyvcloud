@@ -135,6 +135,7 @@ class RelationType(Enum):
     CONTROL_ACCESS = 'controlAccess'
     DEPLOY = 'deploy'
     DISABLE = 'disable'
+    DISCARD_STATE = 'discardState'
     DISK_ATTACH = 'disk:attach'
     DISK_DETACH = 'disk:detach'
     DOWN = 'down'
@@ -1307,6 +1308,68 @@ class Client(object):
                 'The current user does not have access to the resource (%s).' %
                 str(wk_type).split('.')[-1])
 
+    def get_metadata(self, resource):
+        """Fetch metadata of the resource.
+
+        :param resource
+
+        :return: an object containing EntityType.METADATA XML data which
+            represents the metadata associated with the vApp.
+
+        :rtype: lxml.objectify.ObjectifiedElement
+        """
+        return self.get_linked_resource(
+            resource, RelationType.DOWN, EntityType.METADATA.value)
+
+    def del_metadata(self, meta_entry):
+        """Delete specific metadata of the resource
+
+        :param lxml.objectify.ObjectifiedElement entry:
+
+        :return: an object containing EntityType.TASK XML data which
+            represents the asynchronous task deleting the metadata
+
+        :rtype: lxml.objectify.ObjectifiedElement
+        """
+
+        return self.delete_linked_resource(
+            meta_entry, RelationType.REMOVE, None)
+
+    def set_metadata(self,
+                     resource,
+                     domain,
+                     visibility,
+                     key,
+                     value,
+                     metadata_type='MetadataStringValue'):
+        """Set metadata of the resource.
+
+        :param resource
+        :param str domain:
+        :param str visibility:
+        :param str key:
+        :param str value:
+        :param str metadata_type:
+
+        :return: an object containing EntityType.TASK XML data which
+            represents the asynchronous task setting the metadata
+
+        :rtype: lxml.objectify.ObjectifiedElement
+        """
+        new_metadata = E.Metadata(
+            E.MetadataEntry(
+                {
+                    'type': 'xs:string'
+                }, E.Domain(domain, visibility=visibility), E.Key(key),
+                E.TypedValue(
+                    {
+                        '{' + NSMAP['xsi'] + '}type': 'MetadataStringValue'
+                    }, E.Value(value))))
+        metadata = self.get_linked_resource(
+            resource, RelationType.DOWN, EntityType.METADATA.value)
+        return self.post_linked_resource(metadata, RelationType.ADD,
+                                                EntityType.METADATA.value,
+                                                new_metadata)
 
 def find_link(resource, rel, media_type, fail_if_absent=True):
     """Returns the link of the specified rel and type in the resource.
